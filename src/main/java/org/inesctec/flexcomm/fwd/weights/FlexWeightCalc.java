@@ -28,13 +28,13 @@ import com.google.common.collect.Maps;
 public class FlexWeightCalc implements LinkWeigher {
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected static DeviceService deviceService;
+  protected DeviceService deviceService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected static FlexcommService flexcommService;
+  protected FlexcommService flexcommService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected static EnergyService energyService;
+  protected EnergyService energyService;
 
   // TODO:
   // check if distributed maps are needed
