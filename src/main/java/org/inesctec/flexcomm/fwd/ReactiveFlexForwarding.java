@@ -255,8 +255,7 @@ public class ReactiveFlexForwarding {
 
     @Override
     public void event(TopologyEvent event) {
-      // TODO Auto-generated method stub
-      throw new UnsupportedOperationException("Unimplemented method 'event'");
+      return;
     }
 
   }
@@ -273,9 +272,13 @@ public class ReactiveFlexForwarding {
       DeviceId deviceId = flexcommStatistics.deviceId();
       if (event.type() == Type.GLOBAL_STATS_UPDATED) {
         GlobalStatistics deltaStats = flexcommService.getGlobalDeltaStatistics(deviceId);
+
+        double value = 0;
         EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
-        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 180;
-        double value = max_power_drawn - deltaStats.powerDrawn();
+        if (energy != null) {
+          double max_power_drawn = (energy.estimate() + energy.flexibility()) / 180;
+          value = max_power_drawn - deltaStats.powerDrawn();
+        }
 
         long received = 0;
         long sent = 0;
