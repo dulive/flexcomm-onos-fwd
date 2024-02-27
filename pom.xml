@@ -38,6 +38,7 @@
         <onos.app.category>Traffic Engineering</onos.app.category>
         <onos.app.url>http://onosproject.org</onos.app.url>
         <onos.app.readme>Flexcomm Reactive Forwarding</onos.app.readme>
+        <onos.app.requires>org.inesctec.flexcomm.ofexp,org.inesctec.flexcomm.energyclient</onos.app.requires>
     </properties>
 
     <dependencies>
