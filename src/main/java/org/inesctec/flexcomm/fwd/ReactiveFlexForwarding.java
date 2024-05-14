@@ -166,6 +166,11 @@ public class ReactiveFlexForwarding {
     Ethernet inPkt = context.inPacket().parsed();
     TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
 
+    if (inPkt.getEtherType() == Ethernet.TYPE_ARP) {
+      packetOut(context, portNumber);
+      return;
+    }
+
     IPv4 ipv4Packet = (IPv4) inPkt.getPayload();
     byte proto = ipv4Packet.getProtocol();
     selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
