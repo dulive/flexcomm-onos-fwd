@@ -177,7 +177,7 @@ public class ReactiveFlexForwarding {
       TCP tcpPacket = (TCP) ipv4Packet.getPayload();
       selectorBuilder.matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
           .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
-    } else if (proto == IPv4.PROTOCOL_TCP) {
+    } else if (proto == IPv4.PROTOCOL_UDP) {
       UDP udpPacket = (UDP) ipv4Packet.getPayload();
       selectorBuilder.matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
           .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
@@ -193,6 +193,11 @@ public class ReactiveFlexForwarding {
     packetOut(context, portNumber);
   }
 
+  private boolean isControlPacket(Ethernet eth) {
+    short type = eth.getEtherType();
+    return type == Ethernet.TYPE_LLDP || type == Ethernet.TYPE_BSN;
+  }
+
   // packet in
   private class InternalPacketProcessor implements PacketProcessor {
 
@@ -205,11 +210,15 @@ public class ReactiveFlexForwarding {
       InboundPacket pkt = context.inPacket();
       Ethernet ethPkt = pkt.parsed();
 
-      if (ethPkt == null) {
+      if (ethPkt == null || isControlPacket(ethPkt)) {
         return;
       }
 
       HostId id = HostId.hostId(ethPkt.getDestinationMAC());
+
+      if (id.mac().isLldp()) {
+        return;
+      }
 
       Host dst = hostService.getHost(id);
       if (dst == null) {
