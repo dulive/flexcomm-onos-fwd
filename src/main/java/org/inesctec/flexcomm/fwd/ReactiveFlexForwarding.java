@@ -1,7 +1,20 @@
 package org.inesctec.flexcomm.fwd;
 
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_PRIORITY;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_PRIORITY_DEFAULT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_TIMEOUT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_TIMEOUT_DEFAULT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.INHERIT_FLOW_TREATMENT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.INHERIT_FLOW_TREATMENT_DEFAULT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.IPV6_FORWARDING;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.IPV6_FORWARDING_DEFAULT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.PACKET_OUT_OFPP_TABLE;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.PACKET_OUT_OFPP_TABLE_DEFAULT;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.PACKET_OUT_ONLY;
+import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.PACKET_OUT_ONLY_DEFAULT;
 import static org.onlab.util.Tools.groupedThreads;
 
+import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +41,8 @@ import org.onlab.packet.MacAddress;
 import org.onlab.packet.TCP;
 import org.onlab.packet.TpPort;
 import org.onlab.packet.UDP;
+import org.onlab.util.Tools;
+import org.onosproject.cfg.ComponentConfigService;
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.event.Event;
@@ -64,9 +79,11 @@ import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.topology.TopologyEvent;
 import org.onosproject.net.topology.TopologyListener;
 import org.onosproject.net.topology.TopologyService;
+import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
+import org.osgi.service.component.annotations.Modified;
 import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
 import org.slf4j.Logger;
@@ -74,10 +91,13 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableSet;
 
-// TODO:
-// add optional support for ipv6
-// add relevant properties as timeout, priorities, ipv6 forwarding, inherit flow treatment, packet out of pipeline table
-@Component(immediate = true, service = ReactiveFlexForwarding.class)
+@Component(immediate = true, service = ReactiveFlexForwarding.class, property = {
+    PACKET_OUT_ONLY + ":Boolean=" + PACKET_OUT_ONLY_DEFAULT,
+    PACKET_OUT_OFPP_TABLE + ":Boolean=" + PACKET_OUT_OFPP_TABLE_DEFAULT,
+    FLOW_TIMEOUT + ":Integer=" + FLOW_TIMEOUT_DEFAULT,
+    FLOW_PRIORITY + ":Integer=" + FLOW_PRIORITY_DEFAULT,
+    IPV6_FORWARDING + ":Boolean=" + IPV6_FORWARDING_DEFAULT,
+    INHERIT_FLOW_TREATMENT + ":Boolean=" + INHERIT_FLOW_TREATMENT_DEFAULT })
 public class ReactiveFlexForwarding {
 
   private final Logger log = LoggerFactory.getLogger(getClass());
@@ -111,6 +131,9 @@ public class ReactiveFlexForwarding {
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected EnergyService energyService;
 
+  @Reference(cardinality = ReferenceCardinality.MANDATORY)
+  protected ComponentConfigService cfgService;
+
   private final PacketProcessor processor = new InternalPacketProcessor();
   private final TopologyListener topologyListener = new InternalTopologyListener();
   private final FlexcommListener flexcommListener = new InternalFlexcommListener();
@@ -121,44 +144,120 @@ public class ReactiveFlexForwarding {
 
   protected ApplicationId appId;
 
+  private boolean packetOutOnly = PACKET_OUT_ONLY_DEFAULT;
+
+  private boolean packetOutOfppTable = PACKET_OUT_OFPP_TABLE_DEFAULT;
+
+  private int flowTimeout = FLOW_TIMEOUT_DEFAULT;
+
+  private int flowPriority = FLOW_PRIORITY_DEFAULT;
+
+  private boolean ipv6Forwarding = IPV6_FORWARDING_DEFAULT;
+
+  private boolean inheritFlowTreatment = INHERIT_FLOW_TREATMENT_DEFAULT;
+
   @Activate
-  protected void activate() {
+  protected void activate(ComponentContext context) {
     appId = coreService.registerApplication(APP_NAME);
+    cfgService.registerProperties(getClass());
 
     weigher = new FlexWeightCalc();
 
     weightCalcExecutor = Executors.newFixedThreadPool(4, groupedThreads("onos/flexcomm/fwd", "weight-calc", log));
     linkRemovedExecutor = Executors.newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd", "link-removed", log));
+
     flexcommService.addListener(flexcommListener);
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
 
-    TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-    selector.matchEthType(Ethernet.TYPE_IPV4);
-    packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+    readComponentConfiguration(context);
+    requestIntercepts();
 
     log.info("Started", appId.id());
   }
 
   @Deactivate
   protected void deactivate() {
-    TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-    selector.matchEthType(Ethernet.TYPE_IPV4);
-    packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
-
+    cfgService.unregisterProperties(getClass(), false);
+    withdrawIntercepts();
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
     flexcommService.removeListener(flexcommListener);
-
     weightCalcExecutor.shutdown();
     weightCalcExecutor = null;
-
     linkRemovedExecutor.shutdown();
     linkRemovedExecutor = null;
-
     flowRuleService.removeFlowRulesById(appId);
-
     log.info("Stopped", appId.id());
+  }
+
+  @Modified
+  public void modified(ComponentContext context) {
+    readComponentConfiguration(context);
+    requestIntercepts();
+  }
+
+  private void readComponentConfiguration(ComponentContext context) {
+    Dictionary<?, ?> properties = context.getProperties();
+
+    Boolean packetOutOnlyEnabled = Tools.isPropertyEnabled(properties, PACKET_OUT_ONLY);
+    if (packetOutOnlyEnabled == null) {
+      log.info("Packet-out is not configured, using current value of {}", packetOutOnly);
+    } else {
+      packetOutOnly = packetOutOnlyEnabled;
+      log.info("Configured. Packet-out only forwarding is {}", packetOutOnly ? "enabled" : "disabled");
+    }
+
+    Boolean packetOutOfppTableEnabled = Tools.isPropertyEnabled(properties, PACKET_OUT_OFPP_TABLE);
+    if (packetOutOfppTableEnabled == null) {
+      log.info("OFPP_TABLE port is not configured, using current value of {}", packetOutOfppTable);
+    } else {
+      packetOutOfppTable = packetOutOfppTableEnabled;
+      log.info("Configured. Forwarding using OFPP_TABLE port is {}", packetOutOfppTable ? "enabled" : "disabled");
+    }
+
+    flowTimeout = Tools.getIntegerProperty(properties, FLOW_TIMEOUT, FLOW_TIMEOUT_DEFAULT);
+    log.info("Configured. Flow Timeout is configured to {} seconds", flowTimeout);
+
+    flowPriority = Tools.getIntegerProperty(properties, FLOW_PRIORITY, FLOW_PRIORITY_DEFAULT);
+    log.info("Configured. Flow Priority is configured to {}", flowPriority);
+
+    Boolean ipv6ForwardingEnabled = Tools.isPropertyEnabled(properties, IPV6_FORWARDING);
+    if (ipv6ForwardingEnabled == null) {
+      log.info("IPv6 forwarding is not configured, using current value of {}", ipv6Forwarding);
+    } else {
+      ipv6Forwarding = ipv6ForwardingEnabled;
+      log.info("Configured. IPv6 forwarding is {}", ipv6Forwarding ? "enabled" : "disabled");
+    }
+
+    Boolean inheritFlowTreatmentEnabled = Tools.isPropertyEnabled(properties, INHERIT_FLOW_TREATMENT);
+    if (inheritFlowTreatmentEnabled == null) {
+      log.info("Inherit flow treatment is not configured, using current value of {}", inheritFlowTreatment);
+    } else {
+      inheritFlowTreatment = inheritFlowTreatmentEnabled;
+      log.info("Configured. Inherit flow treatment is {}", inheritFlowTreatment ? "enabled" : "disabled");
+    }
+  }
+
+  private void requestIntercepts() {
+    TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+    selector.matchEthType(Ethernet.TYPE_IPV4);
+    packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+
+    selector.matchEthType(Ethernet.TYPE_IPV6);
+    if (ipv6Forwarding) {
+      packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+    } else {
+      packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
+    }
+  }
+
+  private void withdrawIntercepts() {
+    TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+    selector.matchEthType(Ethernet.TYPE_IPV4);
+    packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
+    selector.matchEthType(Ethernet.TYPE_IPV6);
+    packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
   }
 
   private void flood(PacketContext context) {
@@ -188,7 +287,7 @@ public class ReactiveFlexForwarding {
     Ethernet inPkt = context.inPacket().parsed();
     TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
 
-    if (inPkt.getEtherType() == Ethernet.TYPE_ARP) {
+    if (packetOutOnly || inPkt.getEtherType() == Ethernet.TYPE_ARP) {
       packetOut(context, portNumber);
       return;
     }
@@ -210,14 +309,24 @@ public class ReactiveFlexForwarding {
           .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
     }
 
-    TrafficTreatment treatment = DefaultTrafficTreatment.builder().setOutput(portNumber).build();
+    TrafficTreatment treatment;
+    if (inheritFlowTreatment) {
+      treatment = context.treatmentBuilder().setOutput(portNumber).build();
+    } else {
+      treatment = DefaultTrafficTreatment.builder().setOutput(portNumber).build();
+    }
 
     ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder().withSelector(selectorBuilder.build())
-        .withTreatment(treatment).withPriority(10).withFlag(ForwardingObjective.Flag.VERSATILE).fromApp(appId)
-        .makeTemporary(10).add();
+        .withTreatment(treatment).withPriority(flowPriority).withFlag(ForwardingObjective.Flag.VERSATILE).fromApp(appId)
+        .makeTemporary(flowTimeout).add();
 
     flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(), forwardingObjective);
-    packetOut(context, portNumber);
+
+    if (packetOutOfppTable) {
+      packetOut(context, PortNumber.TABLE);
+    } else {
+      packetOut(context, portNumber);
+    }
   }
 
   private boolean isControlPacket(Ethernet eth) {
