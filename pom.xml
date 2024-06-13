@@ -38,7 +38,7 @@
         <onos.app.category>Traffic Engineering</onos.app.category>
         <onos.app.url>http://onosproject.org</onos.app.url>
         <onos.app.readme>Flexcomm Reactive Forwarding</onos.app.readme>
-        <onos.app.requires>org.inesctec.flexcomm.ofexp,org.inesctec.flexcomm.energyclient</onos.app.requires>
+        <onos.app.requires>org.inesctec.flexcomm.statistics,org.inesctec.flexcomm.energy</onos.app.requires>
     </properties>
 
     <dependencies>
@@ -73,15 +73,15 @@
 
         <dependency>
             <groupId>org.inesctec.flexcomm</groupId>
-            <artifactId>of-exp</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <artifactId>statistics</artifactId>
+            <version>1.0.0</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>org.inesctec.flexcomm</groupId>
-            <artifactId>energy-client</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <artifactId>energy</artifactId>
+            <version>1.0.0</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>

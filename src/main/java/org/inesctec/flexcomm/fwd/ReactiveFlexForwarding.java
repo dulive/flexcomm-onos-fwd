@@ -23,15 +23,15 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.inesctec.flexcomm.energyclient.api.EnergyPeriod;
-import org.inesctec.flexcomm.energyclient.api.EnergyService;
+import org.inesctec.flexcomm.energy.api.EnergyPeriod;
+import org.inesctec.flexcomm.energy.api.FlexcommEnergyService;
 import org.inesctec.flexcomm.fwd.weights.FlexWeight;
 import org.inesctec.flexcomm.fwd.weights.FlexWeightCalc;
-import org.inesctec.flexcomm.ofexp.api.FlexcommEvent;
-import org.inesctec.flexcomm.ofexp.api.FlexcommEvent.Type;
-import org.inesctec.flexcomm.ofexp.api.FlexcommListener;
-import org.inesctec.flexcomm.ofexp.api.FlexcommService;
-import org.inesctec.flexcomm.ofexp.api.GlobalStatistics;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsEvent;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsEvent.Type;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsListener;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsService;
+import org.inesctec.flexcomm.statistics.api.GlobalStatistics;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.IPv4;
 import org.onlab.packet.Ip4Address;
@@ -126,17 +126,17 @@ public class ReactiveFlexForwarding {
   protected DeviceService deviceService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected FlexcommService flexcommService;
+  protected FlexcommStatisticsService statisticsService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected EnergyService energyService;
+  protected FlexcommEnergyService energyService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected ComponentConfigService cfgService;
 
   private final PacketProcessor processor = new InternalPacketProcessor();
   private final TopologyListener topologyListener = new InternalTopologyListener();
-  private final FlexcommListener flexcommListener = new InternalFlexcommListener();
+  private final FlexcommStatisticsListener statisticsListener = new InternalStatisticsListener();
 
   private ExecutorService weightCalcExecutor;
   private ExecutorService linkRemovedExecutor;
@@ -166,7 +166,7 @@ public class ReactiveFlexForwarding {
     weightCalcExecutor = Executors.newFixedThreadPool(4, groupedThreads("onos/flexcomm/fwd", "weight-calc", log));
     linkRemovedExecutor = Executors.newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd", "link-removed", log));
 
-    flexcommService.addListener(flexcommListener);
+    statisticsService.addListener(statisticsListener);
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
 
@@ -182,7 +182,7 @@ public class ReactiveFlexForwarding {
     withdrawIntercepts();
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
-    flexcommService.removeListener(flexcommListener);
+    statisticsService.removeListener(statisticsListener);
     weightCalcExecutor.shutdown();
     weightCalcExecutor = null;
     linkRemovedExecutor.shutdown();
@@ -522,17 +522,17 @@ public class ReactiveFlexForwarding {
     }
   }
 
-  private class InternalFlexcommListener implements FlexcommListener {
+  private class InternalStatisticsListener implements FlexcommStatisticsListener {
 
     @Override
-    public void event(FlexcommEvent event) {
+    public void event(FlexcommStatisticsEvent event) {
       if (event.type() == Type.GLOBAL_STATS_UPDATED && weightCalcExecutor != null) {
-        weightCalcExecutor.submit(() -> calculateWeight(event.subject().deviceId()));
+        weightCalcExecutor.submit(() -> calculateWeight(event.subject()));
       }
     }
 
     private void calculateWeight(DeviceId deviceId) {
-      GlobalStatistics deltaStats = flexcommService.getGlobalDeltaStatistics(deviceId);
+      GlobalStatistics deltaStats = statisticsService.getGlobalDeltaStatistics(deviceId);
 
       double value = 0;
       EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
