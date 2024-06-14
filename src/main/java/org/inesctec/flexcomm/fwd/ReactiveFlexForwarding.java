@@ -34,8 +34,10 @@ import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsService;
 import org.inesctec.flexcomm.statistics.api.GlobalStatistics;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.IPv4;
+import org.onlab.packet.IPv6;
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip4Prefix;
+import org.onlab.packet.Ip6Prefix;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
 import org.onlab.packet.TCP;
@@ -292,21 +294,44 @@ public class ReactiveFlexForwarding {
       return;
     }
 
-    IPv4 ipv4Packet = (IPv4) inPkt.getPayload();
-    byte proto = ipv4Packet.getProtocol();
-    selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
-        .matchIPSrc(Ip4Prefix.valueOf(ipv4Packet.getSourceAddress(), Ip4Prefix.MAX_MASK_LENGTH))
-        .matchIPDst(Ip4Prefix.valueOf(ipv4Packet.getDestinationAddress(), Ip4Prefix.MAX_MASK_LENGTH))
-        .matchIPProtocol(proto);
+    if (inPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+      IPv4 ipv4Packet = (IPv4) inPkt.getPayload();
+      byte proto = ipv4Packet.getProtocol();
+      selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
+          .matchIPSrc(Ip4Prefix.valueOf(ipv4Packet.getSourceAddress(), Ip4Prefix.MAX_MASK_LENGTH))
+          .matchIPDst(Ip4Prefix.valueOf(ipv4Packet.getDestinationAddress(), Ip4Prefix.MAX_MASK_LENGTH))
+          .matchIPProtocol(proto);
 
-    if (proto == IPv4.PROTOCOL_TCP) {
-      TCP tcpPacket = (TCP) ipv4Packet.getPayload();
-      selectorBuilder.matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
-          .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
-    } else if (proto == IPv4.PROTOCOL_UDP) {
-      UDP udpPacket = (UDP) ipv4Packet.getPayload();
-      selectorBuilder.matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
-          .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+      if (proto == IPv4.PROTOCOL_TCP) {
+        TCP tcpPacket = (TCP) ipv4Packet.getPayload();
+        selectorBuilder.matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+      }
+      if (proto == IPv4.PROTOCOL_UDP) {
+        UDP udpPacket = (UDP) ipv4Packet.getPayload();
+        selectorBuilder.matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+      }
+    }
+
+    if (inPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+      IPv6 ipv6Packet = (IPv6) inPkt.getPayload();
+      byte nextHeader = ipv6Packet.getNextHeader();
+      selectorBuilder.matchEthType(Ethernet.TYPE_IPV6)
+          .matchIPSrc(Ip6Prefix.valueOf(ipv6Packet.getSourceAddress(), Ip6Prefix.MAX_MASK_LENGTH))
+          .matchIPDst(Ip4Prefix.valueOf(ipv6Packet.getDestinationAddress(), Ip6Prefix.MAX_MASK_LENGTH))
+          .matchIPProtocol(nextHeader);
+
+      if (nextHeader == IPv6.PROTOCOL_TCP) {
+        TCP tcpPacket = (TCP) ipv6Packet.getPayload();
+        selectorBuilder.matchTcpSrc(TpPort.tpPort(tcpPacket.getSourcePort()))
+            .matchTcpDst(TpPort.tpPort(tcpPacket.getDestinationPort()));
+      }
+      if (nextHeader == IPv6.PROTOCOL_UDP) {
+        UDP udpPacket = (UDP) ipv6Packet.getPayload();
+        selectorBuilder.matchUdpSrc(TpPort.tpPort(udpPacket.getSourcePort()))
+            .matchUdpDst(TpPort.tpPort(udpPacket.getDestinationPort()));
+      }
     }
 
     TrafficTreatment treatment;
@@ -316,9 +341,14 @@ public class ReactiveFlexForwarding {
       treatment = DefaultTrafficTreatment.builder().setOutput(portNumber).build();
     }
 
-    ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder().withSelector(selectorBuilder.build())
-        .withTreatment(treatment).withPriority(flowPriority).withFlag(ForwardingObjective.Flag.VERSATILE).fromApp(appId)
-        .makeTemporary(flowTimeout).add();
+    ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+        .withSelector(selectorBuilder.build())
+        .withTreatment(treatment)
+        .withPriority(flowPriority)
+        .withFlag(ForwardingObjective.Flag.VERSATILE)
+        .fromApp(appId)
+        .makeTemporary(flowTimeout)
+        .add();
 
     flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(), forwardingObjective);
 
