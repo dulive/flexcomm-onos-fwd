@@ -37,6 +37,7 @@ import org.onlab.packet.IPv4;
 import org.onlab.packet.IPv6;
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.Ip4Prefix;
+import org.onlab.packet.Ip6Address;
 import org.onlab.packet.Ip6Prefix;
 import org.onlab.packet.IpAddress;
 import org.onlab.packet.MacAddress;
@@ -319,7 +320,7 @@ public class ReactiveFlexForwarding {
       byte nextHeader = ipv6Packet.getNextHeader();
       selectorBuilder.matchEthType(Ethernet.TYPE_IPV6)
           .matchIPSrc(Ip6Prefix.valueOf(ipv6Packet.getSourceAddress(), Ip6Prefix.MAX_MASK_LENGTH))
-          .matchIPDst(Ip4Prefix.valueOf(ipv6Packet.getDestinationAddress(), Ip6Prefix.MAX_MASK_LENGTH))
+          .matchIPDst(Ip6Prefix.valueOf(ipv6Packet.getDestinationAddress(), Ip6Prefix.MAX_MASK_LENGTH))
           .matchIPProtocol(nextHeader);
 
       if (nextHeader == IPv6.PROTOCOL_TCP) {
@@ -388,10 +389,18 @@ public class ReactiveFlexForwarding {
 
       Host dst = hostService.getHost(id);
       if (dst == null) {
-        IPv4 ipv4Packet = (IPv4) ethPkt.getPayload();
-        IpAddress dstIp = Ip4Address.valueOf(ipv4Packet.getDestinationAddress());
+        if (ethPkt.getEtherType() == Ethernet.TYPE_IPV4) {
+          IPv4 ipv4Packet = (IPv4) ethPkt.getPayload();
+          IpAddress dstIp = Ip4Address.valueOf(ipv4Packet.getDestinationAddress());
+          dst = hostService.getHostsByIp(dstIp).stream().findFirst().orElse(null);
+        }
 
-        dst = hostService.getHostsByIp(dstIp).stream().findFirst().orElse(null);
+        if (ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+          IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
+          IpAddress dstIp = Ip6Address.valueOf(ipv6Packet.getDestinationAddress());
+          dst = hostService.getHostsByIp(dstIp).stream().findFirst().orElse(null);
+        }
+
         if (dst == null) {
           flood(context);
           return;
