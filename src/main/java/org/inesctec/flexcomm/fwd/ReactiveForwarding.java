@@ -93,8 +93,6 @@ import org.onosproject.net.HostId;
 import org.onosproject.net.Link;
 import org.onosproject.net.Path;
 import org.onosproject.net.PortNumber;
-import org.onosproject.net.device.DeviceService;
-import org.onosproject.net.device.PortStatistics;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.FlowEntry;
@@ -183,9 +181,6 @@ public class ReactiveForwarding {
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected StorageService storageService;
-
-  @Reference(cardinality = ReferenceCardinality.MANDATORY)
-  protected DeviceService deviceService;
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected FlexcommStatisticsService statisticsService;
@@ -1000,14 +995,7 @@ public class ReactiveForwarding {
         value = max_power_drawn - deltaStats.powerDrawn();
       }
 
-      long received = 0;
-      long sent = 0;
-      for (PortStatistics stats : deviceService.getPortDeltaStatistics(deviceId)) {
-        received += stats.packetsReceived();
-        sent += stats.packetsSent();
-      }
-
-      weigher.setWeight(deviceId, new FlexWeight(received - sent, value < 0 ? 1 : 0));
+      weigher.setWeight(deviceId, new FlexWeight(value < 0 ? 1 : 0));
     }
 
   }

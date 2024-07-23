@@ -10,31 +10,22 @@ public class FlexWeight implements Weight {
 
   public static final FlexWeight NON_VIABLE_WEIGHT = new FlexWeight();
 
-  // packets received - packed transmitted
-  private final long drops;
   private final int value;
   private final int hops;
 
   public FlexWeight() {
-    drops = 0;
     value = 0;
     hops = 0;
   }
 
-  public FlexWeight(long drops, int value) {
-    this.drops = drops;
+  public FlexWeight(int value) {
     this.value = value;
     this.hops = 0;
   }
 
-  public FlexWeight(long drops, int value, int hops) {
-    this.drops = drops;
+  public FlexWeight(int value, int hops) {
     this.value = value;
     this.hops = hops;
-  }
-
-  public long drops() {
-    return drops;
   }
 
   public int value() {
@@ -48,13 +39,13 @@ public class FlexWeight implements Weight {
   @Override
   public Weight merge(Weight otherWeight) {
     FlexWeight otherFlex = (FlexWeight) otherWeight;
-    return new FlexWeight(drops + otherFlex.drops, value + otherFlex.value, hops + otherFlex.hops);
+    return new FlexWeight(value + otherFlex.value, hops + otherFlex.hops);
   }
 
   @Override
   public Weight subtract(Weight otherWeight) {
     FlexWeight otherFlex = (FlexWeight) otherWeight;
-    return new FlexWeight(drops - otherFlex.drops, value - otherFlex.value, hops - otherFlex.hops);
+    return new FlexWeight(value - otherFlex.value, hops - otherFlex.hops);
   }
 
   @Override
@@ -64,7 +55,7 @@ public class FlexWeight implements Weight {
 
   @Override
   public boolean isNegative() {
-    return drops < 0 || value < 0 || hops < 0;
+    return value < 0 || hops < 0;
   }
 
   public static FlexWeight getNonViableWeight() {
@@ -75,15 +66,9 @@ public class FlexWeight implements Weight {
   public int compareTo(Weight o) {
     FlexWeight weight = (FlexWeight) o;
 
-    if (drops != 0 && weight.drops == 0) {
-      return 1;
-    } else if (drops == 0 && weight.drops != 0) {
-      return -1;
-    } else {
-      return value == weight.value
-          ? hops == weight.hops ? Long.compare(drops, weight.drops) : Integer.compare(hops, weight.hops)
-          : Integer.compare(value, weight.value);
-    }
+    return value == weight.value
+        ? Integer.compare(hops, weight.hops)
+        : Integer.compare(value, weight.value);
   }
 
   @Override
@@ -94,17 +79,17 @@ public class FlexWeight implements Weight {
 
     FlexWeight flexWeight = (FlexWeight) obj;
 
-    return drops == flexWeight.drops && value == flexWeight.value && hops == flexWeight.hops;
+    return value == flexWeight.value && hops == flexWeight.hops;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(drops, value, hops);
+    return Objects.hashCode(value, hops);
   }
 
   @Override
   public String toString() {
-    return toStringHelper(this).add("drops", drops).add("value", value).add("hops", hops).toString();
+    return toStringHelper(this).add("value", value).add("hops", hops).toString();
   }
 
 }
