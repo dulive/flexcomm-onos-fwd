@@ -33,8 +33,7 @@ public class FlexWeightCalc implements LinkWeigher {
 
     FlexWeight weight_src = weights.get(src);
     FlexWeight weight_dst = weights.get(dst);
-
-    return new FlexWeight(weight_src.drops() + weight_dst.drops(), weight_src.value() + weight_dst.value(), 1);
+    return new FlexWeight(weight_src.value() + weight_dst.value(), 1);
   }
 
   @Override
