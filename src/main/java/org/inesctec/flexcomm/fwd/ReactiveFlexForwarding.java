@@ -169,6 +169,8 @@ public class ReactiveFlexForwarding {
     weightCalcExecutor = Executors.newFixedThreadPool(4, groupedThreads("onos/flexcomm/fwd", "weight-calc", log));
     linkRemovedExecutor = Executors.newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd", "link-removed", log));
 
+    cfgService.setProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
+        "flexcommStatsPollFrequency", "60");
     statisticsService.addListener(statisticsListener);
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
@@ -186,6 +188,8 @@ public class ReactiveFlexForwarding {
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
     statisticsService.removeListener(statisticsListener);
+    cfgService.unsetProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
+        "flexcommStatsPollFrequency");
     weightCalcExecutor.shutdown();
     weightCalcExecutor = null;
     linkRemovedExecutor.shutdown();
@@ -576,7 +580,7 @@ public class ReactiveFlexForwarding {
       double value = 0;
       EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
       if (energy != null) {
-        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 180;
+        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 15;
         value = max_power_drawn - deltaStats.powerDrawn();
       }
 
