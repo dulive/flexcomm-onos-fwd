@@ -105,7 +105,7 @@ public class ReactiveFlexForwarding {
 
   private final Logger log = LoggerFactory.getLogger(getClass());
 
-  private static final String APP_NAME = "org.inesctec.flexcomm.routing.partialpath";
+  private static final String APP_NAME = "org.inesctec.flexcomm.fwd";
 
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected CoreService coreService;
