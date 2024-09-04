@@ -1,4 +1,4 @@
-package org.inesctec.flexcomm.fwd.weights;
+package org.inesctec.flexcomm.fwd;
 
 import org.onlab.graph.Weight;
 
@@ -8,9 +8,9 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 
 public class FlexWeight implements Weight {
 
-  public static final FlexWeight NON_VIABLE_WEIGHT = new FlexWeight();
+  public static final FlexWeight NON_VIABLE_WEIGHT = new FlexWeight(-1, -1);
 
-  private final int value;
+  private final double value;
   private final int hops;
 
   public FlexWeight() {
@@ -18,17 +18,12 @@ public class FlexWeight implements Weight {
     hops = 0;
   }
 
-  public FlexWeight(int value) {
-    this.value = value;
-    this.hops = 0;
-  }
-
-  public FlexWeight(int value, int hops) {
+  public FlexWeight(double value, int hops) {
     this.value = value;
     this.hops = hops;
   }
 
-  public int value() {
+  public double value() {
     return value;
   }
 
@@ -68,7 +63,7 @@ public class FlexWeight implements Weight {
 
     return value == weight.value
         ? Integer.compare(hops, weight.hops)
-        : Integer.compare(value, weight.value);
+        : Double.compare(value, weight.value);
   }
 
   @Override

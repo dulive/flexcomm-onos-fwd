@@ -61,13 +61,9 @@ import java.util.concurrent.ExecutorService;
 
 import org.inesctec.flexcomm.energy.api.EnergyPeriod;
 import org.inesctec.flexcomm.energy.api.FlexcommEnergyService;
-import org.inesctec.flexcomm.fwd.weights.FlexWeight;
-import org.inesctec.flexcomm.fwd.weights.FlexWeightCalc;
-import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsEvent;
-import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsEvent.Type;
-import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsListener;
 import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsService;
 import org.inesctec.flexcomm.statistics.api.GlobalStatistics;
+import org.onlab.graph.Weight;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.ICMP;
 import org.onlab.packet.ICMP6;
@@ -114,6 +110,8 @@ import org.onosproject.net.packet.PacketContext;
 import org.onosproject.net.packet.PacketPriority;
 import org.onosproject.net.packet.PacketProcessor;
 import org.onosproject.net.packet.PacketService;
+import org.onosproject.net.topology.LinkWeigher;
+import org.onosproject.net.topology.TopologyEdge;
 import org.onosproject.net.topology.TopologyEvent;
 import org.onosproject.net.topology.TopologyListener;
 import org.onosproject.net.topology.TopologyService;
@@ -249,12 +247,8 @@ public class ReactiveForwarding {
   private boolean inheritFlowTreatment = INHERIT_FLOW_TREATMENT_DEFAULT;
 
   private final TopologyListener topologyListener = new InternalTopologyListener();
-  private final FlexcommStatisticsListener statisticsListener = new InternalStatisticsListener();
 
   private ExecutorService blackHoleExecutor;
-  private ExecutorService weightCalcExecutor;
-
-  private FlexWeightCalc weigher;
 
   @Activate
   public void activate(ComponentContext context) {
@@ -272,16 +266,12 @@ public class ReactiveForwarding {
     blackHoleExecutor = newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd",
         "black-hole-fixer",
         log));
-    weightCalcExecutor = newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd", "weight-calc", log));
 
     cfgService.registerProperties(getClass());
     appId = coreService.registerApplication("org.inesctec.flexcomm.fwd");
 
-    weigher = new FlexWeightCalc();
-
     cfgService.setProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
         "flexcommStatsPollFrequency", "60");
-    statisticsService.addListener(statisticsListener);
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
     readComponentConfiguration(context);
@@ -297,15 +287,11 @@ public class ReactiveForwarding {
     flowRuleService.removeFlowRulesById(appId);
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
-    statisticsService.removeListener(statisticsListener);
     cfgService.unsetProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
         "flexcommStatsPollFrequency");
-    weightCalcExecutor.shutdown();
-    weightCalcExecutor = null;
     blackHoleExecutor.shutdown();
     blackHoleExecutor = null;
     processor = null;
-    weigher = null;
     log.info("Stopped");
   }
 
@@ -570,7 +556,7 @@ public class ReactiveForwarding {
       Set<Path> paths = topologyService.getPaths(topologyService.currentTopology(),
           pkt.receivedFrom().deviceId(),
           dst.location().deviceId(),
-          weigher);
+          new FlexWeigher());
       if (paths.isEmpty()) {
         // If there are no paths, flood and bail.
         flood(context, macMetrics);
@@ -976,30 +962,6 @@ public class ReactiveForwarding {
     return builder.build();
   }
 
-  private class InternalStatisticsListener implements FlexcommStatisticsListener {
-
-    @Override
-    public void event(FlexcommStatisticsEvent event) {
-      if (event.type() == Type.GLOBAL_STATS_UPDATED && weightCalcExecutor != null) {
-        weightCalcExecutor.submit(() -> calculateWeight(event.subject()));
-      }
-    }
-
-    private void calculateWeight(DeviceId deviceId) {
-      GlobalStatistics deltaStats = statisticsService.getGlobalDeltaStatistics(deviceId);
-
-      double value = 0;
-      EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
-      if (energy != null) {
-        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 15;
-        value = max_power_drawn - deltaStats.powerDrawn();
-      }
-
-      weigher.setWeight(deviceId, new FlexWeight(value < 0 ? 1 : 0));
-    }
-
-  }
-
   // Wrapper class for a source and destination pair of MAC addresses
   private final class SrcDstPair {
     final MacAddress src;
@@ -1028,4 +990,44 @@ public class ReactiveForwarding {
       return Objects.hash(src, dst);
     }
   }
+
+  private class FlexWeigher implements LinkWeigher {
+
+    public FlexWeigher() {
+    }
+
+    @Override
+    public Weight weight(TopologyEdge edge) {
+      DeviceId src = edge.src().deviceId();
+      DeviceId dst = edge.dst().deviceId();
+
+      double weight_src = calculateWeight(src);
+      double weight_dst = calculateWeight(dst);
+      return new FlexWeight(weight_src + weight_dst, 1);
+    }
+
+    private double calculateWeight(DeviceId deviceId) {
+      GlobalStatistics deltaStats = statisticsService.getGlobalDeltaStatistics(deviceId);
+
+      double value = 0;
+      EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
+      if (energy != null) {
+        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 15;
+        value = max_power_drawn - deltaStats.powerDrawn();
+      }
+
+      return value < 0 ? -value : 0;
+    }
+
+    @Override
+    public Weight getInitialWeight() {
+      return new FlexWeight();
+    }
+
+    @Override
+    public Weight getNonViableWeight() {
+      return FlexWeight.NON_VIABLE_WEIGHT;
+    }
+  }
+
 }
