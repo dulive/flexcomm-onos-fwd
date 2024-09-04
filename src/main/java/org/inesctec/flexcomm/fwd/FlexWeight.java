@@ -1,4 +1,4 @@
-package org.inesctec.flexcomm.fwd.weights;
+package org.inesctec.flexcomm.fwd;
 
 import org.onlab.graph.Weight;
 
@@ -8,11 +8,11 @@ import static com.google.common.base.MoreObjects.toStringHelper;
 
 public class FlexWeight implements Weight {
 
-  public static final FlexWeight NON_VIABLE_WEIGHT = new FlexWeight();
+  public static final FlexWeight NON_VIABLE_WEIGHT = new FlexWeight(-1, -1, -1);
 
   // packets received - packed transmitted
   private final long drops;
-  private final int value;
+  private final double value;
   private final int hops;
 
   public FlexWeight() {
@@ -21,13 +21,7 @@ public class FlexWeight implements Weight {
     hops = 0;
   }
 
-  public FlexWeight(long drops, int value) {
-    this.drops = drops;
-    this.value = value;
-    this.hops = 0;
-  }
-
-  public FlexWeight(long drops, int value, int hops) {
+  public FlexWeight(long drops, double value, int hops) {
     this.drops = drops;
     this.value = value;
     this.hops = hops;
@@ -37,7 +31,7 @@ public class FlexWeight implements Weight {
     return drops;
   }
 
-  public int value() {
+  public double value() {
     return value;
   }
 
@@ -81,8 +75,8 @@ public class FlexWeight implements Weight {
       return -1;
     } else {
       return value == weight.value
-          ? hops == weight.hops ? Long.compare(drops, weight.drops) : Integer.compare(hops, weight.hops)
-          : Integer.compare(value, weight.value);
+          ? drops == weight.drops ? Integer.compare(hops, weight.hops) : Long.compare(drops, weight.drops)
+          : Double.compare(value, weight.value);
     }
   }
 
