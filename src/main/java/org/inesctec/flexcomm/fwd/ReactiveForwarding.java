@@ -270,8 +270,6 @@ public class ReactiveForwarding {
     cfgService.registerProperties(getClass());
     appId = coreService.registerApplication("org.inesctec.flexcomm.fwd");
 
-    cfgService.setProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
-        "flexcommStatsPollFrequency", "60");
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
     readComponentConfiguration(context);
@@ -287,8 +285,6 @@ public class ReactiveForwarding {
     flowRuleService.removeFlowRulesById(appId);
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
-    cfgService.unsetProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
-        "flexcommStatsPollFrequency");
     blackHoleExecutor.shutdown();
     blackHoleExecutor = null;
     processor = null;
@@ -1012,7 +1008,11 @@ public class ReactiveForwarding {
       double value = 0;
       EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
       if (energy != null) {
-        double max_power_drawn = (energy.estimate() + energy.flexibility()) / 15;
+        int pollFrequency = cfgService
+            .getProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
+                "flexcommStatsPollFrequency")
+            .asInteger();
+        double max_power_drawn = (energy.estimate() + energy.flexibility()) / (900 / pollFrequency);
         value = max_power_drawn - deltaStats.powerDrawn();
       }
 
