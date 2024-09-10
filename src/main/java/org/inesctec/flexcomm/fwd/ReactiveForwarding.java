@@ -1056,7 +1056,7 @@ public class ReactiveForwarding {
         sent += stats.packetsSent();
       }
 
-      return new ValueDropsPair(value < 0 ? -value : 0, received - sent);
+      return new ValueDropsPair(value < 0 ? 1 : 0, received - sent);
     }
 
     @Override
