@@ -1016,7 +1016,7 @@ public class ReactiveForwarding {
         value = max_power_drawn - deltaStats.powerDrawn();
       }
 
-      return value < 0 ? -value : 0;
+      return value < 0 ? 1 : 0;
     }
 
     @Override
