@@ -16,6 +16,7 @@
 package org.inesctec.flexcomm.fwd;
 
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
+import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_PRIORITY;
 import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_PRIORITY_DEFAULT;
 import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.FLOW_TIMEOUT;
@@ -51,6 +52,7 @@ import static org.inesctec.flexcomm.fwd.OsgiPropertyConstants.RECORD_METRICS_DEF
 import static org.onlab.util.Tools.groupedThreads;
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.time.Instant;
 import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.List;
@@ -58,9 +60,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.inesctec.flexcomm.energy.api.EnergyPeriod;
 import org.inesctec.flexcomm.energy.api.FlexcommEnergyService;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsEvent;
+import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsListener;
 import org.inesctec.flexcomm.statistics.api.FlexcommStatisticsService;
 import org.inesctec.flexcomm.statistics.api.GlobalStatistics;
 import org.onlab.graph.Weight;
@@ -83,12 +89,14 @@ import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
 import org.onosproject.event.Event;
 import org.onosproject.net.ConnectPoint;
+import org.onosproject.net.Device;
 import org.onosproject.net.DeviceId;
 import org.onosproject.net.Host;
 import org.onosproject.net.HostId;
 import org.onosproject.net.Link;
 import org.onosproject.net.Path;
 import org.onosproject.net.PortNumber;
+import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.FlowEntry;
@@ -186,9 +194,13 @@ public class ReactiveForwarding {
   @Reference(cardinality = ReferenceCardinality.MANDATORY)
   protected FlexcommEnergyService energyService;
 
+  @Reference(cardinality = ReferenceCardinality.MANDATORY)
+  protected DeviceService deviceService;
+
   private ReactivePacketProcessor processor = new ReactivePacketProcessor();
 
   private EventuallyConsistentMap<MacAddress, ReactiveForwardMetrics> metrics;
+  private EventuallyConsistentMap<DeviceId, EnergyTimePair> energies;
 
   private ApplicationId appId;
 
@@ -247,8 +259,10 @@ public class ReactiveForwarding {
   private boolean inheritFlowTreatment = INHERIT_FLOW_TREATMENT_DEFAULT;
 
   private final TopologyListener topologyListener = new InternalTopologyListener();
+  private final FlexcommStatisticsListener statisticsListener = new InternalFlexcommStatisticsListener();
 
   private ExecutorService blackHoleExecutor;
+  private ScheduledExecutorService energyCollectorExecutor;
 
   @Activate
   public void activate(ComponentContext context) {
@@ -263,13 +277,26 @@ public class ReactiveForwarding {
             (key, metricsData) -> new MultiValuedTimestamp<>(new WallClockTimestamp(), System.nanoTime()))
         .build();
 
+    KryoNamespace.Builder energySerializer = KryoNamespace.newBuilder()
+        .register(KryoNamespaces.API)
+        .register(EnergyTimePair.class);
+    energies = storageService.<DeviceId, EnergyTimePair>eventuallyConsistentMapBuilder()
+        .withName("energies-fwd")
+        .withSerializer(energySerializer)
+        .withTimestampProvider(
+            (key, energiesData) -> new MultiValuedTimestamp<>(new WallClockTimestamp(), System.nanoTime()))
+        .build();
+
     blackHoleExecutor = newSingleThreadExecutor(groupedThreads("onos/flexcomm/fwd",
         "black-hole-fixer",
         log));
+    energyCollectorExecutor = newSingleThreadScheduledExecutor(
+        groupedThreads("onos/flexcomm/fwd", "energy-collector", log));
 
     cfgService.registerProperties(getClass());
     appId = coreService.registerApplication("org.inesctec.flexcomm.fwd");
 
+    statisticsService.addListener(statisticsListener);
     packetService.addProcessor(processor, PacketProcessor.director(2));
     topologyService.addListener(topologyListener);
     readComponentConfiguration(context);
@@ -285,8 +312,11 @@ public class ReactiveForwarding {
     flowRuleService.removeFlowRulesById(appId);
     packetService.removeProcessor(processor);
     topologyService.removeListener(topologyListener);
+    statisticsService.removeListener(statisticsListener);
     blackHoleExecutor.shutdown();
     blackHoleExecutor = null;
+    energyCollectorExecutor.shutdown();
+    energyCollectorExecutor = null;
     processor = null;
     log.info("Stopped");
   }
@@ -987,6 +1017,33 @@ public class ReactiveForwarding {
     }
   }
 
+  private final class EnergyTimePair {
+    final double energy;
+    final long time;
+
+    private EnergyTimePair(double energy, long time) {
+      this.energy = energy;
+      this.time = time;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+      EnergyTimePair that = (EnergyTimePair) o;
+      return energy == that.energy && time == that.time;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(energy, time);
+    }
+  }
+
   private class FlexWeigher implements LinkWeigher {
 
     public FlexWeigher() {
@@ -1003,17 +1060,14 @@ public class ReactiveForwarding {
     }
 
     private double calculateWeight(DeviceId deviceId) {
-      GlobalStatistics deltaStats = statisticsService.getGlobalDeltaStatistics(deviceId);
-
       double value = 0;
       EnergyPeriod energy = energyService.getCurrentEnergyPeriod(deviceId);
-      if (energy != null) {
-        int pollFrequency = cfgService
-            .getProperty("org.inesctec.flexcomm.statistics.impl.OpenFlowFlexcomStatisticsProvider",
-                "flexcommStatsPollFrequency")
-            .asInteger();
-        double max_power_drawn = (energy.estimate() + energy.flexibility()) / (900 / pollFrequency);
-        value = max_power_drawn - deltaStats.powerDrawn();
+      EnergyTimePair pair = energies.get(deviceId);
+      if (energy != null && pair != null) {
+        GlobalStatistics currentStats = statisticsService.getGlobalStatistics(deviceId);
+        long now = Instant.now().getEpochSecond();
+        double max_power_drawn = (energy.estimate() + energy.flexibility()) / (900 / (now - pair.time));
+        value = max_power_drawn - (currentStats.powerDrawn() - pair.energy);
       }
 
       return value < 0 ? 1 : 0;
@@ -1028,6 +1082,35 @@ public class ReactiveForwarding {
     public Weight getNonViableWeight() {
       return FlexWeight.NON_VIABLE_WEIGHT;
     }
+  }
+
+  private void updateEnergy() {
+    long now = Instant.now().getEpochSecond();
+    for (Device device : deviceService.getAvailableDevices()) {
+      DeviceId deviceId = device.id();
+      GlobalStatistics globalStatistics = statisticsService.getGlobalStatistics(deviceId);
+      energies.put(deviceId, new EnergyTimePair(globalStatistics.powerDrawn(), now));
+    }
+  }
+
+  private class InternalFlexcommStatisticsListener implements FlexcommStatisticsListener {
+
+    private Boolean isDisable = false;
+
+    @Override
+    public void event(FlexcommStatisticsEvent event) {
+      synchronized (isDisable) {
+        if (isDisable) {
+          return;
+        }
+
+        energyCollectorExecutor.scheduleAtFixedRate(() -> updateEnergy(), 0, 15, TimeUnit.MINUTES);
+
+        isDisable = true;
+        statisticsService.removeListener(statisticsListener);
+      }
+    }
+
   }
 
 }
